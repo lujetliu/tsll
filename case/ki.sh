@@ -68,19 +68,10 @@ create_variables() {
     eval "${yaml_string}"
 }
 
-# Execute parse_yaml() direct from command line
-# if [ "x" != "x${1}" ] && [ "x--debug" != "x${1}" ]; then
 # parse_yaml "./docker-compose.yaml" "yaml_"
 create_variables "./docker-compose.yaml" "yaml_"
-# fi
-# echo $yaml_services_aither_user
-# echo $yaml_services_tailscale_hostname
 
-CREATE_TAILSCALE="docker container create -h $yaml_services_tailscale_hostname " 
-
-# volumes
-# v0=${yaml_services_tailscale_volumes[0]}
-# v1=${yaml_services_tailscale_volumes[1]}
+CREATE_TAILSCALE="docker run -h $yaml_services_tailscale_hostname " 
 
 # cap_add
 # ca0=${yaml_services_tailscale_cap_add[0]}
@@ -119,18 +110,45 @@ for i in ${yaml_services_tailscale_volumes[@]};do
 	CREATE_TAILSCALE="${CREATE_TAILSCALE} -v $v "
 done
 
+# name
+
+
+# network
+# CREATE_TAILSCALE="${CREATE_TAILSCALE}"
+hostname=${yaml_services_tailscale_hostname}
+hostname=$(echo $hostname | sed 's/[ ]*//g')
+network_name="${hostname}_default"
+
+# create a network
+docker network create $network_name
+
+CREATE_TAILSCALE="${CREATE_TAILSCALE} --network $network_name "
+
+# name
+tailscale_name="${hostname}-tailscale-1"
+CREATE_TAILSCALE="${CREATE_TAILSCALE} --name $tailscale_name "
+
 # image
 image=${yaml_services_tailscale_image}
-CREATE_TAILSCALE="${CREATE_TAILSCALE} $image "
-# echo $CREATE_TAILSCALE
+CREATE_TAILSCALE="${CREATE_TAILSCALE} -d $image "
 
+# command
+tailscale_cmd=${yaml_services_tailscale_command}
+if [ ! -z "$tailscale_cmd" ];then
+	CREATE_TAILSCALE="${CREATE_TAILSCALE} $tailscale_cmd "
+fi
+
+
+eval $CREATE_TAILSCALE
 
 
 #------------------------------------------------------------aither
-CREATE_AITHER="docker container create "
+CREATE_AITHER="docker run "
 
 name=${yaml_services_aither_container_name}
-echo $name
+if [ ! -z "$name" ];then
+	CREATE_AITHER="${CREATE_AITHER} --name $name "
+fi
 
 # privileged
 privi=${yaml_services_aither_privileged}
@@ -153,10 +171,10 @@ if [ $tty = "true" ]; then
 fi
 
 
-stdin=${yaml_services_aither_stdin_open}
-if [ $stdin = "true" ]; then
-	CREATE_AITHER="${CREATE_AITHER} -a STDIN "
-fi
+# stdin=${yaml_services_aither_stdin_open}
+# if [ $stdin = "true" ]; then
+# 	CREATE_AITHER="${CREATE_AITHER} -a STDOUT "
+# fi
 
 # volumes
 cpath=$(pwd ) # use absolute path
@@ -176,11 +194,24 @@ done
 
 # network
 nwk=${yaml_services_aither_network_mode}
-CREATE_AITHER="${CREATE_AITHER} --network $nwk "
+if [ ! -z "$nwk" ];then
+	nwk=${nwk##service:}
+	CREATE_AITHER="${CREATE_AITHER} --net container:$tailscale_name "
+fi
+
 
 # image
-image=${yaml_services_aither_image}
-CREATE_AITHER="${CREATE_AITHER} enokiinc/aither "
+# image=${yaml_services_aither_image}
+CREATE_AITHER="${CREATE_AITHER} -d enokiinc/aither "
 
-$CREATE_AITHER
+aither_cmd=${yaml_services_aither_command}
+if [ ! -z "$aither_cmd" ];then
+	CREATE_AITHER="${CREATE_AITHER} $aither_cmd "
+fi
+
+eval $CREATE_AITHER
+
+sleep 1
+
+docker exec  $tailscale_name  tailscale up --authkey=$TAILSCALE_AUTH_KEY
 
